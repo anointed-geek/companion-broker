@@ -1,107 +1,231 @@
-//  OpenShift sample Node application
-var express = require('express'),
-    fs      = require('fs'),
-    app     = express(),
-    eps     = require('ejs'),
-    morgan  = require('morgan');
-    
-Object.assign=require('object-assign')
+const Express = require('express');
+const ExpressWS = require("express-ws");
+const HTTP = require("http");
+const BodyParser = require('body-parser');
+const Guid = require("guid");
+const _ = require("lodash");
+const ServerPort = process.argv[2] || 80;
 
-app.engine('html', require('ejs').renderFile);
-app.use(morgan('combined'))
+var app = Express();
+var expressWS = ExpressWS(app);
+var deviceMap = {};
+var registrations = {};
+var sessions = {};
+var sessionTimeout = -1;
 
-var port = process.env.PORT || process.env.OPENSHIFT_NODEJS_PORT || 8080,
-    ip   = process.env.IP   || process.env.OPENSHIFT_NODEJS_IP || '0.0.0.0',
-    mongoURL = process.env.OPENSHIFT_MONGODB_DB_URL || process.env.MONGO_URL,
-    mongoURLLabel = "";
+app.use(BodyParser.urlencoded({ extended: true }))
+app.use(BodyParser.json());
 
-if (mongoURL == null && process.env.DATABASE_SERVICE_NAME) {
-  var mongoServiceName = process.env.DATABASE_SERVICE_NAME.toUpperCase(),
-      mongoHost = process.env[mongoServiceName + '_SERVICE_HOST'],
-      mongoPort = process.env[mongoServiceName + '_SERVICE_PORT'],
-      mongoDatabase = process.env[mongoServiceName + '_DATABASE'],
-      mongoPassword = process.env[mongoServiceName + '_PASSWORD']
-      mongoUser = process.env[mongoServiceName + '_USER'];
+function createRandomString() {
+	var chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXTZ";
+	var length = 8;
+	var randomString = '';
+	for (var i = 0; i < length; i++) {
+		var rnum = Math.floor(Math.random() * chars.length);
+		randomString += chars.substring(rnum, rnum + 1);
+	}
 
-  if (mongoHost && mongoPort && mongoDatabase) {
-    mongoURLLabel = mongoURL = 'mongodb://';
-    if (mongoUser && mongoPassword) {
-      mongoURL += mongoUser + ':' + mongoPassword + '@';
-    }
-    // Provide UI label that excludes user id and pw
-    mongoURLLabel += mongoHost + ':' + mongoPort + '/' + mongoDatabase;
-    mongoURL += mongoHost + ':' +  mongoPort + '/' + mongoDatabase;
-
-  }
+	return randomString;
 }
-var db = null,
-    dbDetails = new Object();
 
-var initDb = function(callback) {
-  if (mongoURL == null) return;
+function startSessionHeartbeat() {
+	if(sessionTimeout === -1) {
+		sessionTimeout = setInterval(()=>{
+			console.log("heartbeat");
+		}, 5000);
+	}
+}
 
-  var mongodb = require('mongodb');
-  if (mongodb == null) return;
+function notifyDevice(mapping, message_data) {
+	var device = mapping.target;
+	var device_ws;
+	if(device && device.connected && (device_ws = sessions[device.deviceId])) {
+		device_ws.web_socket.send(JSON.stringify(message_data));
+	}
+}
 
-  mongodb.connect(mongoURL, function(err, conn) {
-    if (err) {
-      callback(err);
-      return;
-    }
+function notifyCompanion(mapping, id, message_data) {
+	var companion = mapping.companions[id];
+	var companion_ws;
+	if(companion && companion.connected && (companion_ws = sessions[id])) {
+		companion_ws.web_socket.send(JSON.stringify(message_data));
+	}
+}
 
-    db = conn;
-    dbDetails.databaseName = db.databaseName;
-    dbDetails.url = mongoURLLabel;
-    dbDetails.type = 'MongoDB';
+function notifyCompanions(mapping, message_data) {
+	// Message to companions
+	for(var key in mapping.companions) {
+		notifyCompanion(mapping, key, message_data);
+	}
+}
 
-    console.log('Connected to MongoDB at: %s', mongoURL);
-  });
-};
+function getDevicePairing(token) {
+	return deviceMap[token];
+}
 
-app.get('/', function (req, res) {
-  // try to initialize the db on every request if it's not already
-  // initialized.
-  if (!db) {
-    initDb(function(err){});
-  }
-  if (db) {
-    var col = db.collection('counts');
-    // Create a document with request IP and current time of request
-    col.insert({ip: req.ip, date: Date.now()});
-    col.count(function(err, count){
-      res.render('index.html', { pageCountMessage : count, dbInfo: dbDetails });
-    });
-  } else {
-    res.render('index.html', { pageCountMessage : null});
-  }
+function createDevicePairing(token) {
+	return deviceMap[token] = deviceMap[token] || {};
+}
+
+// respond with "hello world" when a GET request is made to the homepage
+app.post('/vuedevice/register', function (req,res) {
+	var deviceId = req.body.deviceId;
+	var token = (getDevicePairing(req.body.token) && req.body.token) || Guid.create();
+	var key = createRandomString();
+
+	registrations[key] = {
+		token: token,
+		target: {deviceId: deviceId, connected: false, registration: new Date()},
+		companions: {}
+	};
+
+	res.json({ token: token, key: key });
 });
 
-app.get('/pagecount', function (req, res) {
-  // try to initialize the db on every request if it's not already
-  // initialized.
-  if (!db) {
-    initDb(function(err){});
-  }
-  if (db) {
-    db.collection('counts').count(function(err, count ){
-      res.send('{ pageCount: ' + count + '}');
-    });
-  } else {
-    res.send('{ pageCount: -1 }');
-  }
+app.post('/vuedevice/pair-device', function (req,res) {
+	var deviceId = req.body.deviceId;
+	var key = req.body.key;
+	var pending = registrations[key];
+	var pairing;
+	
+	if (pending) {
+		delete registrations[key];
+		
+		// Save
+		if(!(pairing = getDevicePairing(pending.token))) {
+			pairing = createDevicePairing(pending.token);
+		} 
+		
+		pairing.companions[deviceId] = {connected: false, registration: new Date()};		
+
+		// Valid, return the acknowledgement
+		res.json({ token: pending.token, message: { status: "SUCCESS"} });
+		
+	} else {
+		// invalid
+		res.json({ message: {status: "FAILURE"} });
+	}
 });
 
-// error handling
-app.use(function(err, req, res, next){
-  console.error(err.stack);
-  res.status(500).send('Something bad happened!');
+app.get("/vuedevice/companion/:sessionToken/device/:deviceId", function (req,res) {
+	var token = req.params.sessionToken;
+	var deviceId = req.params.deviceId;
+	var pairing = getDevicePairing(token);
+	var additionalData = {};
+	if (pairing) {
+		
+		// Send list of devices
+		if(pairing.target.deviceId === deviceId) {
+			additionalData = { companions: pairing.companions };
+		}
+		
+		res.json({ token: token, data: additionalData });
+		
+	} else {
+		res.sendStatus(401);
+	}
 });
 
-initDb(function(err){
-  console.log('Error connecting to Mongo. Message:\n'+err);
+//////////////////////////////////////////
+/*
+interface ICompanionClientRequest {
+	command: number,
+	token: string,
+	data: any
+}
+*/
+/////////////////////////////////////////
+app.ws("/vuedevice/remote", function(ws, req) {
+	ws.on("close", (wsid) => {
+		console.log("closed");
+
+		for(var deviceId in sessions) {
+			var web_socket_session;
+			if(web_socket_session = sessions[deviceId]) {
+				if(web_socket_session.web_socket === ws) {
+					var pairing = getDevicePairing(web_socket_session.token);
+					var isCompanion = (pairing.target.deviceId != deviceId);
+					var deviceInfo = !isCompanion ? pairing.target : pairing.companions[deviceId];
+
+					// Remove session
+					deviceInfo.connected = false;
+					delete sessions[deviceId];
+
+					// Notify connected parties
+					if(isCompanion) {
+						notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
+					} else {
+						notifyCompanions(pairing, {status: "DEVICE_DISCONNECTED"});
+					}
+				}
+			}
+		}
+	});
+
+	// Handshake auth
+	ws.on("message", (rawMessage) => {
+		console.log('received: %s', rawMessage);
+		var msg = "";
+		try{
+			msg = JSON.parse(rawMessage);
+		} catch(e){
+			ws.send(JSON.stringify({ status: "INVALID_MESSAGE"}));
+			ws.close();
+			return;
+		}
+		
+		var deviceId = msg.deviceId;
+		var token = msg.token;
+		var pairing = getDevicePairing(token);
+		
+		//1. Ensure payload is set
+		if(!pairing || !token || !deviceId) {
+			ws.close(); 
+			return;
+		}
+		
+		var websocket_session = sessions[deviceId] = (sessions[deviceId] || { token: token, web_socket: ws, handshake_complete: false, last_updated: new Date() });
+		websocket_session.web_socket = ws;
+		
+		// Handshake
+		if(deviceId === pairing.target.deviceId) {
+			if(msg.command === 0) {
+				pairing.target.connected = true;
+				websocket_session.handshake_complete = true;
+
+				notifyDevice(pairing, { status: "AUTHENTICATED", companions: pairing.companions });
+				notifyCompanions(pairing, {status: "DEVICE_CONNECTED"});
+				
+			} else if(websocket_session.handshake_complete) {
+
+				// Relay message
+				notifyCompanions(pairing, msg );
+			}
+
+		} else {
+			if(msg.command === 0) {
+				pairing.companions[deviceId].connected = true;
+				websocket_session.handshake_complete = true;
+
+				notifyCompanion(pairing, deviceId, { status: "AUTHENTICATED" });
+				notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
+				
+				// Notify target 
+				startSessionHeartbeat();
+				
+			} else if(websocket_session.handshake_complete) {
+				// Relay message
+				notifyDevice(pairing, msg );
+			}
+		}
+		
+		// If did not handshake, disconnect
+		if(!websocket_session.handshake_complete) {
+			ws.close();
+		}
+	});
 });
 
-app.listen(port, ip);
-console.log('Server running on http://%s:%s', ip, port);
-
-module.exports = app ;
+app.listen(ServerPort, () => {
+	console.log("Express server running on port", ServerPort);
+});

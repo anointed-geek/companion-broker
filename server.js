@@ -111,7 +111,7 @@ app.post('/companion/pair-device', function (req,res) {
 	}
 });
 
-app.get("/companion/companion/:sessionToken/device/:deviceId", function (req,res) {
+app.get("/companion/:sessionToken/device/:deviceId", function (req,res) {
 	var token = req.params.sessionToken;
 	var deviceId = req.params.deviceId;
 	var pairing = getDevicePairing(token);

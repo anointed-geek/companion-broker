@@ -4,7 +4,7 @@ const HTTP = require("http");
 const BodyParser = require('body-parser');
 const Guid = require("guid");
 const _ = require("lodash");
-const ServerPort = process.argv[2] || 8080;
+const ServerPort = process.env.PORT || process.env.OPENSHIFT_NODEJS_PORT || 8080;
 
 var app = Express();
 var expressWS = ExpressWS(app);
@@ -72,7 +72,7 @@ app.get('/', function(req,res) {
 	res.json({greeting: "Hello Server World"});
 });
 
-app.post('/companion/register', function (req,res) {
+app.post('/register', function (req,res) {
 	var deviceId = req.body.deviceId;
 	var token = (getDevicePairing(req.body.token) && req.body.token) || Guid.create();
 	var key = createRandomString();
@@ -86,7 +86,7 @@ app.post('/companion/register', function (req,res) {
 	res.json({ token: token, key: key });
 });
 
-app.post('/companion/pair-device', function (req,res) {
+app.post('/pair-device', function (req,res) {
 	var deviceId = req.body.deviceId;
 	var key = req.body.key;
 	var pending = registrations[key];
@@ -111,7 +111,7 @@ app.post('/companion/pair-device', function (req,res) {
 	}
 });
 
-app.get("/companion/:sessionToken/device/:deviceId", function (req,res) {
+app.get("/device-list/:sessionToken/device/:deviceId", function (req,res) {
 	var token = req.params.sessionToken;
 	var deviceId = req.params.deviceId;
 	var pairing = getDevicePairing(token);
@@ -139,7 +139,7 @@ interface ICompanionClientRequest {
 }
 */
 /////////////////////////////////////////
-app.ws("/companion/remote", function(ws, req) {
+app.ws("/remote", function(ws, req) {
 	ws.on("close", (wsid) => {
 		console.log("closed");
 

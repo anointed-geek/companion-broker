@@ -4,22 +4,22 @@ GET /
 ==============
 Test JSON
 
-POST /companion/register
+POST /register
 ================
 Registers the device for companion setup, returns a generated key for auth confirmation
 body JSON: { deviceId: "YOUR_DEVICE_ID_HERE" }
 
-POST /companion/pair-device
+POST /pair-device
 ================
 Registers the companion to a pending registration
 body JSON: { deviceId: "YOUR_DEVICE_ID_HERE", key: "GENERATED_KEY_HERE" }
 
-GET /companion/:sessionToken/device/:deviceId
+GET /device-list/:sessionToken/device/:deviceId
 ================
 Lists the device connected companions
 body JSON: { deviceId: "YOUR_DEVICE_ID_HERE" }
 
-WEBSOCKET 
+WEBSOCKET /remote
 ================
 body JSON: { deviceId: "YOUR_DEVICE_ID_HERE", token: "TOKEN", command: NUMBER }
 

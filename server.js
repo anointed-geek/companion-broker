@@ -67,8 +67,12 @@ function createDevicePairing(token) {
 	return deviceMap[token] = deviceMap[token] || {};
 }
 
-// respond with "hello world" when a GET request is made to the homepage
-app.post('/vuedevice/register', function (req,res) {
+// 
+app.get('/', function(req,res) {
+	res.json({greeting: "Hello Server World"});
+});
+
+app.post('/companion/register', function (req,res) {
 	var deviceId = req.body.deviceId;
 	var token = (getDevicePairing(req.body.token) && req.body.token) || Guid.create();
 	var key = createRandomString();
@@ -82,7 +86,7 @@ app.post('/vuedevice/register', function (req,res) {
 	res.json({ token: token, key: key });
 });
 
-app.post('/vuedevice/pair-device', function (req,res) {
+app.post('/companion/pair-device', function (req,res) {
 	var deviceId = req.body.deviceId;
 	var key = req.body.key;
 	var pending = registrations[key];
@@ -107,7 +111,7 @@ app.post('/vuedevice/pair-device', function (req,res) {
 	}
 });
 
-app.get("/vuedevice/companion/:sessionToken/device/:deviceId", function (req,res) {
+app.get("/companion/companion/:sessionToken/device/:deviceId", function (req,res) {
 	var token = req.params.sessionToken;
 	var deviceId = req.params.deviceId;
 	var pairing = getDevicePairing(token);
@@ -135,7 +139,7 @@ interface ICompanionClientRequest {
 }
 */
 /////////////////////////////////////////
-app.ws("/vuedevice/remote", function(ws, req) {
+app.ws("/companion/remote", function(ws, req) {
 	ws.on("close", (wsid) => {
 		console.log("closed");
 

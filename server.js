@@ -4,7 +4,7 @@ const HTTP = require("http");
 const BodyParser = require('body-parser');
 const Guid = require("guid");
 const _ = require("lodash");
-const ServerPort = process.argv[2] || 80;
+const ServerPort = process.argv[2] || 8080;
 
 var app = Express();
 var expressWS = ExpressWS(app);

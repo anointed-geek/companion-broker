@@ -83,7 +83,7 @@ app.get('/', function(req,res) {
 
 app.post('/register', function (req,res) {
 	var deviceId = req.body.deviceId;
-	var token = (getDevicePairing(req.body.token) && req.body.token) || Guid.create();
+	var token = (getDevicePairing(req.body.token) && req.body.token) || Guid.create().value;
 	var key = createRandomString();
 
 	registrations[key] = {

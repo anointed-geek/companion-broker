@@ -67,6 +67,15 @@ function createDevicePairing(token) {
 	return deviceMap[token] = deviceMap[token] || {};
 }
 
+function registrationExists(token) {
+	for(var key in registrations) {
+		const entry = registrations[key];
+		if(entry.token === token) {
+			return true;
+		}
+	}
+}
+
 // 
 app.get('/', function(req,res) {
 	res.json({greeting: "Hello Server World"});
@@ -120,11 +129,14 @@ app.get("/device-list/:sessionToken/device/:deviceId", function (req,res) {
 		
 		// Send list of devices
 		if(pairing.target.deviceId === deviceId) {
-			additionalData = { companions: pairing.companions };
+			additionalData = { status: "REGISTERED_PAIRING_COMPLETE", companions: pairing.companions };
 		}
 		
-		res.json({ token: token, data: additionalData });
+		res.json({ token: token, message: additionalData });
 		
+	} else if(registrationExists(token)) {
+		
+		res.json({ token: token, message: { status: "REGISTERED_PAIRING", companions: [] } });
 	} else {
 		res.sendStatus(401);
 	}

@@ -64,16 +64,19 @@ function getDevicePairing(token) {
 }
 
 function createDevicePairing(token) {
-	return deviceMap[token] = deviceMap[token] || {};
+	var reg = findRegistration(token);
+	return deviceMap[token] = deviceMap[token] || reg;
 }
 
-function registrationExists(token) {
+function findRegistration(token) {
 	for(var key in registrations) {
-		const entry = registrations[key];
+		var entry = registrations[key];
 		if(entry.token === token) {
-			return true;
+			return entry;
 		}
 	}
+
+	return null;
 }
 
 // 
@@ -83,7 +86,7 @@ app.get('/', function(req,res) {
 
 app.post('/register', function (req,res) {
 	var deviceId = req.body.deviceId;
-	var token = (getDevicePairing(req.body.token) && req.body.token) || Guid.create().value;
+	var token = (getDevicePairing(req.body.token) && req.body.token) || (findRegistration(req.body.token) && req.body.token) || Guid.create().value;
 	var key = createRandomString();
 
 	registrations[key] = {
@@ -102,17 +105,19 @@ app.post('/pair-device', function (req,res) {
 	var pairing;
 	
 	if (pending) {
-		delete registrations[key];
-		
-		// Save
-		if(!(pairing = getDevicePairing(pending.token))) {
-			pairing = createDevicePairing(pending.token);
-		} 
-		
-		pairing.companions[deviceId] = {connected: false, registration: new Date()};		
+		try{
+			// Save
+			if(!(pairing = getDevicePairing(pending.token))) {
+				pairing = createDevicePairing(pending.token);
+			} 
+			
+			pairing.companions[deviceId] = {connected: false, registration: new Date()};		
 
-		// Valid, return the acknowledgement
-		res.json({ token: pending.token, message: { status: "SUCCESS"} });
+			// Valid, return the acknowledgement
+			res.json({ token: pending.token, message: { status: "SUCCESS"} });
+
+			delete registrations[key];
+		} catch(err){}
 		
 	} else {
 		// invalid
@@ -134,7 +139,7 @@ app.get("/device-list/:sessionToken/device/:deviceId", function (req,res) {
 		
 		res.json({ token: token, message: additionalData });
 		
-	} else if(registrationExists(token)) {
+	} else if(findRegistration(token)) {
 		
 		res.json({ token: token, message: { status: "REGISTERED_PAIRING", companions: [] } });
 	} else {

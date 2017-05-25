@@ -6,7 +6,7 @@ module.exports = {
         this.mDBConn = null;
 
         this.getDbConnString = function() {
-            var mongoURL = process.env.OPENSHIFT_MONGODB_DB_URL || process.env.MONGO_URL || JSON.parse(fs.readFileSync("package.json", "utf8")).db["conn-str"];
+            var mongoURL = process.env.OPENSHIFT_MONGODB_DB_URL || process.env.MONGO_URL;
             if (!mongoURL && process.env.DATABASE_SERVICE_NAME) {
                 var mongoServiceName = process.env.DATABASE_SERVICE_NAME.toUpperCase(),
                     mongoHost = process.env[mongoServiceName + '_SERVICE_HOST'],
@@ -24,7 +24,7 @@ module.exports = {
                 }
             }
 
-            return mongoURL;
+            return mongoURL || JSON.parse(fs.readFileSync("package.json", "utf8")).db["conn-str"];
         }
 
         this.connect = function(callback) {

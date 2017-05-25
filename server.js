@@ -4,12 +4,13 @@ const HTTP = require("http");
 const BodyParser = require('body-parser');
 const Guid = require("guid");
 const _ = require("lodash");
+const DataSource = require("./db");
 const ServerPort = process.env.PORT || process.env.OPENSHIFT_NODEJS_PORT || 8080;
 
+
+var Db = new DataSource.Db();
 var app = Express();
 var expressWS = ExpressWS(app);
-var deviceMap = {};
-var registrations = {};
 var sessions = {};
 var sessionTimeout = -1;
 
@@ -59,24 +60,80 @@ function notifyCompanions(mapping, message_data) {
 	}
 }
 
-function getDevicePairing(token) {
-	return deviceMap[token];
+function register(deviceId, token, key) {
+	Db.connect((mongo, err) => {
+		var col = mongo.collection("registrations");
+		col.insert({
+			token: token,
+			key: key,
+			target: {deviceId: deviceId, connected: false, registration: new Date()},
+			companions: {}
+		});
+	});
 }
 
-function createDevicePairing(token) {
-	var reg = findRegistration(token);
-	return deviceMap[token] = deviceMap[token] || reg;
+function getDevicePairing(token, callback) {
+	Db.connect((mongo, err) => {
+		var col = mongo.collection("deviceMap");
+
+		col.find({token: token}).toArray((err, results) => {
+			callback&&callback(results[0], col);
+		});
+	});
 }
 
-function findRegistration(token) {
-	for(var key in registrations) {
-		var entry = registrations[key];
-		if(entry.token === token) {
-			return entry;
+function createDevicePairing(token, deviceId, callback) {
+	getDevicePairing(token, (pair, col1) => {
+		if(pair) {
+			// Update and Save
+			pair.companions[deviceId] = { deviceId: deviceId, connected: false, registration: new Date() };
+			col1.update({}, pair, {upsert: true});
+			callback&&callback(pair);
+			return;
 		}
-	}
 
-	return null;
+		findRegistrationByToken(token, (reg, col2) => {
+			if(!reg) {
+				callback&&callback(null);
+				return;
+			}
+
+			Db.connect((mongo, err) => {
+				var col = mongo.collection("deviceMap"),
+					deviceEntry = _.cloneDeep(reg);
+				
+				// remove from regs
+				col2.remove(reg);
+
+				// Add to real list
+				delete deviceEntry._id;
+				delete deviceEntry.key;
+				deviceEntry.companions[deviceId] = { deviceId: deviceId, connected: false, registration: new Date() };
+				col.insert(deviceEntry);
+				callback&&callback(deviceEntry);
+			});
+		});
+	});
+}
+
+function findRegistrationByToken(token, callback) {
+	Db.connect((mongo, err) => {
+		var col = mongo.collection("registrations");
+
+		col.find({token: token}).toArray((err, results) => {
+			callback&&callback(results[0], col);
+		});
+	});
+}
+
+function findRegistrationByKey(key, callback) {
+	Db.connect((mongo, err) => {
+		var col = mongo.collection("registrations");
+
+		col.find({key: key}).toArray((err, results) => {
+			callback&&callback(results[0], col);
+		});
+	});
 }
 
 // 
@@ -86,65 +143,75 @@ app.get('/', function(req,res) {
 
 app.post('/register', function (req,res) {
 	var deviceId = req.body.deviceId;
-	var token = (getDevicePairing(req.body.token) && req.body.token) || (findRegistration(req.body.token) && req.body.token) || Guid.create().value;
-	var key = createRandomString();
+	var possibleToken = req.body.token;
+	var newGuid = Guid.create().value;
+	var newKey = createRandomString();
 
-	registrations[key] = {
-		token: token,
-		target: {deviceId: deviceId, connected: false, registration: new Date()},
-		companions: {}
-	};
+	// check if in device mapping
+	getDevicePairing(possibleToken, (pair, col1) => {
+		if(pair) {
+			register(deviceId, pair.token, newKey);
+			res.json({ token: pair.token, key: newKey });
+			return;
+		}
 
-	res.json({ token: token, key: key });
+		// No device, check registrations
+		findRegistrationByToken(possibleToken, (reg, col2) => {
+			if(reg) {
+				reg.key = newKey;
+				col2.update({}, reg, {upsert: true});
+				res.json({ token: reg.token, key: newKey });
+				return;
+			}
+
+			// No registration, register now
+			register(deviceId, newGuid, newKey);
+			res.json({ token: newGuid, key: newKey });
+		});
+	});
 });
 
 app.post('/pair-device', function (req,res) {
 	var deviceId = req.body.deviceId;
 	var key = req.body.key;
-	var pending = registrations[key];
-	var pairing;
-	
-	if (pending) {
-		try{
-			// Save
-			if(!(pairing = getDevicePairing(pending.token))) {
-				pairing = createDevicePairing(pending.token);
-			} 
-			
-			pairing.companions[deviceId] = {connected: false, registration: new Date()};		
 
-			// Valid, return the acknowledgement
-			res.json({ token: pending.token, message: { status: "SUCCESS"} });
+	findRegistrationByKey(key, (reg, col1) => {
+		if(reg) {
+			createDevicePairing(reg.token, deviceId, ()=>{
+				res.json({ token: reg.token, message: { status: "SUCCESS"} });
+			});
 
-			delete registrations[key];
-		} catch(err){}
-		
-	} else {
-		// invalid
-		res.json({ message: {status: "FAILURE"} });
-	}
+		} else {
+			res.json({ message: {status: "FAILURE"} });
+		}
+	});
 });
 
 app.get("/device-list/:sessionToken/device/:deviceId", function (req,res) {
 	var token = req.params.sessionToken;
 	var deviceId = req.params.deviceId;
-	var pairing = getDevicePairing(token);
 	var additionalData = {};
-	if (pairing) {
-		
+
+	getDevicePairing(token, (pairing, col1) => {
+		if(!pairing) {
+			findRegistrationByToken(token, (reg, col2) => {
+				if(!reg) {
+					res.sendStatus(401);
+					return;
+				}
+
+				res.json({ token: token, message: { status: "REGISTERED_PAIRING", companions: [] } });
+			});
+			return;
+		}
+
 		// Send list of devices
 		if(pairing.target.deviceId === deviceId) {
 			additionalData = { status: "REGISTERED_PAIRING_COMPLETE", companions: pairing.companions };
 		}
 		
 		res.json({ token: token, message: additionalData });
-		
-	} else if(findRegistration(token)) {
-		
-		res.json({ token: token, message: { status: "REGISTERED_PAIRING", companions: [] } });
-	} else {
-		res.sendStatus(401);
-	}
+	});
 });
 
 //////////////////////////////////////////
@@ -160,27 +227,23 @@ app.ws("/remote", function(ws, req) {
 	ws.on("close", (wsid) => {
 		console.log("closed");
 
-		for(var deviceId in sessions) {
-			var web_socket_session;
-			if(web_socket_session = sessions[deviceId]) {
-				if(web_socket_session.web_socket === ws) {
-					var pairing = getDevicePairing(web_socket_session.token);
-					var isCompanion = (pairing.target.deviceId != deviceId);
-					var deviceInfo = !isCompanion ? pairing.target : pairing.companions[deviceId];
+		var session = _.find(sessions, (sess) => { return sess.web_socket == ws; });
+		getDevicePairing(session.token, (pairing, coll) => {
+			var isCompanion = session.isCompanion;
+			var deviceInfo = !isCompanion ? pairing.target : pairing.companions[session.deviceId];
 
-					// Remove session
-					deviceInfo.connected = false;
-					delete sessions[deviceId];
+			// Remove session
+			deviceInfo.connected = false;
+			delete sessions[session.deviceId];
+			coll.update({}, pairing, {upsert: true});
 
-					// Notify connected parties
-					if(isCompanion) {
-						notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
-					} else {
-						notifyCompanions(pairing, {status: "DEVICE_DISCONNECTED"});
-					}
-				}
+			// Notify connected parties
+			if(isCompanion) {
+				notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
+			} else {
+				notifyCompanions(pairing, {status: "DEVICE_DISCONNECTED"});
 			}
-		}
+		});
 	});
 
 	// Handshake auth
@@ -197,56 +260,63 @@ app.ws("/remote", function(ws, req) {
 		
 		var deviceId = msg.deviceId;
 		var token = msg.token;
-		var pairing = getDevicePairing(token);
-		
 		//1. Ensure payload is set
-		if(!pairing || !token || !deviceId) {
+		if(!token || !deviceId) {
 			ws.close(); 
 			return;
 		}
-		
-		var websocket_session = sessions[deviceId] = (sessions[deviceId] || { token: token, web_socket: ws, handshake_complete: false, last_updated: new Date() });
-		websocket_session.web_socket = ws;
-		
-		// Handshake
-		if(deviceId === pairing.target.deviceId) {
-			if(msg.command === 0) {
-				pairing.target.connected = true;
-				websocket_session.handshake_complete = true;
 
-				notifyDevice(pairing, { status: "AUTHENTICATED", companions: pairing.companions });
-				notifyCompanions(pairing, {status: "DEVICE_CONNECTED"});
-				
-			} else if(websocket_session.handshake_complete) {
 
-				// Relay message
-				notifyCompanions(pairing, msg );
+		getDevicePairing(token, (pairing, coll1) => {
+			var websocket_session = sessions[deviceId] = (sessions[deviceId] || { deviceId: deviceId, isCompanion: (deviceId != pairing.target.deviceId), token: token, web_socket: ws, handshake_complete: false, last_updated: new Date() });
+			websocket_session.web_socket = ws;
+			
+			// Handshake
+			if(deviceId === pairing.target.deviceId) {
+				if(msg.command === 0) {
+					pairing.target.connected = true;
+					websocket_session.handshake_complete = true;
+
+					coll1.update({}, pairing, {upsert: true}, ()=>{
+						notifyDevice(pairing, { status: "AUTHENTICATED", companions: pairing.companions });
+						notifyCompanions(pairing, {status: "DEVICE_CONNECTED"});
+					});
+					
+				} else if(websocket_session.handshake_complete) {
+
+					// Relay message
+					notifyCompanions(pairing, msg );
+				}
+
+			} else {
+				if(msg.command === 0) {
+					pairing.companions[deviceId].connected = true;
+					websocket_session.handshake_complete = true;
+
+					coll1.update({}, pairing, {upsert: true}, ()=>{
+						notifyCompanion(pairing, deviceId, { status: "AUTHENTICATED" });
+						notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
+
+						// Notify target 
+						startSessionHeartbeat();
+					});
+					
+				} else if(websocket_session.handshake_complete) {
+					// Relay message
+					notifyDevice(pairing, msg );
+				}
 			}
-
-		} else {
-			if(msg.command === 0) {
-				pairing.companions[deviceId].connected = true;
-				websocket_session.handshake_complete = true;
-
-				notifyCompanion(pairing, deviceId, { status: "AUTHENTICATED" });
-				notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
-				
-				// Notify target 
-				startSessionHeartbeat();
-				
-			} else if(websocket_session.handshake_complete) {
-				// Relay message
-				notifyDevice(pairing, msg );
+			
+			// If did not handshake, disconnect
+			if(!websocket_session.handshake_complete) {
+				ws.close();
 			}
-		}
-		
-		// If did not handshake, disconnect
-		if(!websocket_session.handshake_complete) {
-			ws.close();
-		}
+		});
 	});
 });
 
 app.listen(ServerPort, () => {
-	console.log("Express server running on port", ServerPort);
+	Db.connect((mongo, err) => {
+		console.log("Express server running on port", ServerPort);
+	});
 });

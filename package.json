@@ -18,6 +18,9 @@
     "guid": "0.0.12",
     "lodash": "^4.17.4"
   },
+  "db": {
+    "conn-str": "mongodb://localhost:27017/companion-broker"
+  },
   "engine": {
     "node": "*",
     "npm": "*"

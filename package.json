@@ -19,7 +19,7 @@
     "lodash": "^4.17.4"
   },
   "db": {
-    "conn-str": "mongodb://localhost:27017/companion-broker"
+    "conn-str": "mongodb://127.0.0.1:27017/companion-broker"
   },
   "engine": {
     "node": "*",

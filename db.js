@@ -32,7 +32,7 @@ module.exports = {
             if(!this.mDBConn) {
                 var connUrl = this.getDbConnString();
                 console.log("Connecting to MongoDB at: %s", connUrl);
-                mongodb.connect(connUrl, function(err, conn) {
+                mongodb.connect(connUrl, (err, conn) => {
                     if(err) {
                         console.log('Error trying to connect to MongoDB at: %s', JSON.stringify(err));
                     } else {
@@ -45,7 +45,7 @@ module.exports = {
 
             } else {
                 // Already open
-                callback&&callback(this.mDBConn, err);
+                callback&&callback(this.mDBConn, null);
             }
             
         }

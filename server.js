@@ -296,7 +296,7 @@ app.ws("/remote", function(ws, req) {
 					websocket_session.handshake_complete = true;
 
 					coll1.update({}, pairing, {upsert: true}, ()=>{
-						notifyCompanion(pairing, deviceId, { status: "AUTHENTICATED" });
+						notifyCompanion(pairing, deviceId, { status: (pairing.target.connected ? "AUTHENTICATED_CONNECTED" : "AUTHENTICATED") });
 						notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
 
 						// Notify target 

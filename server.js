@@ -320,3 +320,5 @@ app.listen(ServerPort, () => {
 		console.log("Express server running on port", ServerPort);
 	});
 });
+
+module.exports = app;

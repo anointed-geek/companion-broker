@@ -16,6 +16,7 @@ module.exports = {
                     mongoUser = process.env[mongoServiceName + '_USER'];
 
                 if (mongoHost && mongoPort && mongoDatabase) {
+                    mongoURL = 'mongodb://';
                     if (mongoUser && mongoPassword) {
                         mongoURL += mongoUser + ':' + mongoPassword + '@';
                     }

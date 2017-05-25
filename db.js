@@ -31,11 +31,12 @@ module.exports = {
             
             if(!this.mDBConn) {
                 var connUrl = this.getDbConnString();
+                console.log("Connecting to MongoDB at: %s", connUrl);
                 mongodb.connect(connUrl, function(err, conn) {
                     if(err) {
                         console.log('Error trying to connect to MongoDB at: %s', JSON.stringify(err));
                     } else {
-                        console.log('Connected to MongoDB at: %s', connUrl);
+                        console.log('Connected to MongoDB!');
                     }
                     
                     callback&&callback((this.mDBConn = conn), err);

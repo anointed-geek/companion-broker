@@ -228,22 +228,24 @@ app.ws("/remote", function(ws, req) {
 		console.log("closed");
 
 		var session = _.find(sessions, (sess) => { return sess.web_socket == ws; });
-		getDevicePairing(session.token, (pairing, coll) => {
-			var isCompanion = session.isCompanion;
-			var deviceInfo = !isCompanion ? pairing.target : pairing.companions[session.deviceId];
+		if(session) {
+			getDevicePairing(session.token, (pairing, coll) => {
+				var isCompanion = session.isCompanion;
+				var deviceInfo = !isCompanion ? pairing.target : pairing.companions[session.deviceId];
 
-			// Remove session
-			deviceInfo.connected = false;
-			delete sessions[session.deviceId];
-			coll.update({}, pairing, {upsert: true});
+				// Remove session
+				deviceInfo.connected = false;
+				delete sessions[session.deviceId];
+				coll.update({}, pairing, {upsert: true});
 
-			// Notify connected parties
-			if(isCompanion) {
-				notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
-			} else {
-				notifyCompanions(pairing, {status: "DEVICE_DISCONNECTED"});
-			}
-		});
+				// Notify connected parties
+				if(isCompanion) {
+					notifyDevice(pairing, { status: "COMPANION_UPDATE", companions: pairing.companions });
+				} else {
+					notifyCompanions(pairing, {status: "DEVICE_DISCONNECTED"});
+				}
+			});
+		}
 	});
 
 	// Handshake auth

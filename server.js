@@ -16,6 +16,13 @@ var sessionTimeout = -1;
 
 app.use(BodyParser.urlencoded({ extended: true }))
 app.use(BodyParser.json());
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+
+    next();
+});
 
 function createRandomString() {
 	var chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXTZ";
@@ -182,7 +189,7 @@ app.post('/pair-device', function (req,res) {
 			});
 
 		} else {
-			res.json({ message: {status: "FAILURE"} });
+			res.json({ message: {status: "PAIRING FAILED"} });
 		}
 	});
 });

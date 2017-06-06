@@ -84,7 +84,7 @@ function getDevicePairing(token, callback) {
 		var col = mongo.collection("deviceMap");
 
 		col.find({token: token}).toArray((err, results) => {
-			callback&&callback(results[0], col);
+			callback&&callback(results[0] || null, col || null);
 		});
 	});
 }
@@ -166,7 +166,9 @@ app.post('/register', function (req,res) {
 		findRegistrationByToken(possibleToken, (reg, col2) => {
 			if(reg) {
 				reg.key = newKey;
-				col2.update({}, reg, {upsert: true});
+				col2.remove(reg);
+				delete reg._id;
+				col2.insert(reg);
 				res.json({ token: reg.token, key: newKey });
 				return;
 			}
@@ -277,6 +279,13 @@ app.ws("/remote", function(ws, req) {
 
 
 		getDevicePairing(token, (pairing, coll1) => {
+			// Should never happen
+			if(!pairing) {
+				ws.send(JSON.stringify({status: "UNAUTHORIZED"}));
+				ws.close();
+				return;
+			}
+
 			var websocket_session = sessions[deviceId] = (sessions[deviceId] || { deviceId: deviceId, isCompanion: (deviceId != pairing.target.deviceId), token: token, web_socket: ws, handshake_complete: false, last_updated: new Date() });
 			websocket_session.web_socket = ws;
 			
